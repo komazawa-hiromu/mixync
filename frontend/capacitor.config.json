@@ -1,0 +1,14 @@
+{
+  "appId": "com.biomixer.app",
+  "appName": "BioMixer",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "hostname": "localhost",
+    "androidScheme": "http",
+    "allowNavigation": [
+      "10.0.2.2",
+      "localhost"
+    ]
+  }
+}

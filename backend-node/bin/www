@@ -1,0 +1,370 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+const app = require('../app');
+const debug = require('debug')('backend-node:server');
+const http = require('http');
+const { initDb } = require('../lib/database');
+
+// Initialize the database
+initDb();
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+const port = normalizePort(process.env.PORT || '3001');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+const server = http.createServer(app);
+
+// --- WebSocket Setup and Alarm Checker ---
+const { WebSocketServer } = require('ws');
+const { db } = require('../lib/database');
+const axios = require('axios');
+
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', function connection(ws) {
+  console.log('A new client connected to WebSocket.');
+  ws.on('error', console.error);
+});
+
+// Alarm scheduler - checks every minute for alarms to ring
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    const currentDay = now.getDay();
+
+    console.log(`[ALARM-SCHEDULER] Checking alarms at ${currentTime}, day ${currentDay}`);
+
+    const stmt = db.prepare('SELECT * FROM alarms WHERE time = ? AND is_active = 1');
+    const alarms = stmt.all(currentTime);
+
+    if (alarms && alarms.length > 0) {
+      console.log(`[ALARM-SCHEDULER] Found ${alarms.length} active alarms`);
+
+      for (const alarm of alarms) {
+        const activeDays = alarm.days_of_week.split(',').map(d => parseInt(d.trim()));
+
+        if (activeDays.includes(currentDay)) {
+          console.log(`[ALARM-SCHEDULER] Triggering alarm for user ${alarm.user_id} at ${alarm.time}`);
+
+          try {
+            const finalMixing = alarm.mixing_pattern || 'A';
+            console.log(`[ALARM-SCHEDULER] Using mixing pattern: ${finalMixing}`);
+
+            const alarmTime = new Date().toISOString();
+            let eventId;
+
+            // Check if a pre-process event already exists (created within last 10 minutes)
+            const existingEventStmt = db.prepare(`
+              SELECT id FROM alarm_events 
+              WHERE alarm_id = ? 
+              AND created_at >= datetime('now', '-10 minutes')
+              ORDER BY created_at DESC LIMIT 1
+            `);
+            const existingEvent = existingEventStmt.get(alarm.id);
+
+            if (existingEvent) {
+              eventId = existingEvent.id;
+              console.log(`[ALARM-SCHEDULER] Found existing pre-process event ${eventId}`);
+
+              // Update rang_at_jp
+              const updateStmt = db.prepare("UPDATE alarm_events SET rang_at_jp = datetime('now', 'localtime') WHERE id = ?");
+              updateStmt.run(eventId);
+            } else {
+              // Create new event if none exists
+              const eventStmt = db.prepare(`
+                INSERT INTO alarm_events (
+                  user_id, alarm_id, alarm_time, mixing_pattern, rang_at_jp
+                ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+              `);
+              const eventInfo = eventStmt.run(alarm.user_id, alarm.id, alarmTime, finalMixing);
+              eventId = eventInfo.lastInsertRowid;
+              console.log(`[ALARM-SCHEDULER] Created new event ${eventId} with mixing ${finalMixing}`);
+            }
+
+            const payload = {
+              sound_file: alarm.sound_file,
+              day_of_week: currentDay,
+              mixing_pattern: finalMixing
+            };
+
+            const pythonResponse = await axios.post('http://localhost:8000/process-sleep-data', payload);
+            const { effect_applied, audio_data_base64, audio_format } = pythonResponse.data;
+
+            const broadcastPayload = {
+              type: 'RING_ALARM',
+              alarm: {
+                ...alarm,
+                eventId: eventId,
+                mixing_pattern: finalMixing,
+                audioData: `data:audio/${audio_format};base64,${audio_data_base64}`
+              }
+            };
+
+            wss.clients.forEach(client => {
+              if (client.readyState === require('ws').OPEN) {
+                client.send(JSON.stringify(broadcastPayload));
+                console.log('[ALARM-SCHEDULER] Sent alarm to WebSocket client');
+              }
+            });
+
+          } catch (e) {
+            console.error('[ALARM-SCHEDULER] Error processing alarm:', e.message);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[ALARM-SCHEDULER] Error:', err);
+  }
+}, 60 * 1000);
+
+// Pre-alarm scheduler - runs 5 minutes before alarm for AUTO mode ONLY
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const fiveMinutesLater = new Date(now.getTime() + 5 * 60 * 1000);
+    const targetTime = `${fiveMinutesLater.getHours().toString().padStart(2, '0')}:${fiveMinutesLater.getMinutes().toString().padStart(2, '0')}`;
+    const targetDay = fiveMinutesLater.getDay();
+
+    console.log(`[PRE-ALARM] Checking for AUTO alarms at ${targetTime} (5 min ahead)`);
+
+    const stmt = db.prepare('SELECT * FROM alarms WHERE time = ? AND is_active = 1 AND mixing_pattern = ?');
+    const autoAlarms = stmt.all(targetTime, 'AUTO');
+
+    if (autoAlarms && autoAlarms.length > 0) {
+      console.log(`[PRE-ALARM] Found ${autoAlarms.length} AUTO alarms in 5 minutes`);
+
+      for (const alarm of autoAlarms) {
+        const activeDays = alarm.days_of_week.split(',').map(d => parseInt(d.trim()));
+
+        if (activeDays.includes(targetDay)) {
+          console.log(`[PRE-ALARM] Processing AUTO alarm for user ${alarm.user_id}`);
+
+          try {
+            // 1. Create alarm event NOW (5 minutes before alarm rings)
+            const alarmTime = fiveMinutesLater;
+            const eventStmt = db.prepare(`
+              INSERT INTO alarm_events (
+                user_id, alarm_id, alarm_time, mixing_pattern, rang_at_jp
+              ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+            `);
+            const eventInfo = eventStmt.run(alarm.user_id, alarm.id, alarmTime.toISOString(), 'AUTO');
+            const eventId = eventInfo.lastInsertRowid;
+
+            console.log(`[PRE-ALARM] Created event ${eventId} for alarm ${alarm.id}`);
+
+            // 2. Fetch HR data from Fitbit
+            // Calculate time range: 30 minutes before alarm to 15 minutes before alarm
+            const endTime = new Date(alarmTime.getTime() - 15 * 60 * 1000); // 15 min before alarm
+            const startTime = new Date(alarmTime.getTime() - 30 * 60 * 1000); // 30 min before alarm
+
+            console.log(`[PRE-ALARM] Fetching HR data from ${startTime.toISOString()} to ${endTime.toISOString()}`);
+
+            // Get Fitbit tokens
+            const userStmt = db.prepare('SELECT fitbit_access_token FROM users WHERE id = ?');
+            const user = userStmt.get(alarm.user_id);
+
+            let recommendedMixing = 'A';
+            let confidence = 0;
+            let hrValues = [];
+
+            if (user && user.fitbit_access_token) {
+              try {
+                // Format dates for Fitbit API
+                const dateStr = startTime.toISOString().split('T')[0];
+                const startTimeStr = startTime.toTimeString().slice(0, 8);
+                const endTimeStr = endTime.toTimeString().slice(0, 8);
+
+                // Fetch heart rate data from Fitbit
+                const hrResponse = await axios.get(
+                  `https://api.fitbit.com/1/user/-/activities/heart/date/${dateStr}/1d/1sec/time/${startTimeStr}/${endTimeStr}.json`,
+                  {
+                    headers: {
+                      'Authorization': `Bearer ${user.fitbit_access_token}`
+                    }
+                  }
+                );
+
+                const intradayData = hrResponse.data['activities-heart-intraday']?.dataset || [];
+
+                if (intradayData.length > 0) {
+                  console.log(`[PRE-ALARM] Received ${intradayData.length} HR data points`);
+
+                  // Interpolate to 5s intervals (simple version)
+                  // Note: Full interpolation logic is in alarm-process.js, here we use a simplified version
+                  // or we could import the helper if we moved it to a shared lib
+                  hrValues = intradayData.map(d => d.value); // Simplified for now
+
+                  // Calculate stats
+                  const sum = hrValues.reduce((a, b) => a + b, 0);
+                  const avg = sum / hrValues.length;
+                  const variance = hrValues.reduce((s, v) => s + Math.pow(v - avg, 2), 0) / hrValues.length;
+                  const std = Math.sqrt(variance);
+
+                  // Store HR data in database
+                  const updateHrStmt = db.prepare(`
+                    UPDATE alarm_events 
+                    SET hr_pattern_before = ?, 
+                        hr_avg_before = ?, 
+                        hr_std_before = ?
+                    WHERE id = ?
+                  `);
+                  updateHrStmt.run(
+                    JSON.stringify(hrValues),
+                    avg,
+                    std,
+                    eventId
+                  );
+
+                  console.log(`[PRE-ALARM] Stored HR data in event ${eventId}`);
+
+                  // Get past events for DTW comparison
+                  const pastEventsStmt = db.prepare(`
+                    SELECT 
+                      id as event_id,
+                      hr_pattern_before,
+                      mixing_pattern,
+                      comfort_score
+                    FROM alarm_events
+                    WHERE user_id = ? 
+                      AND id != ?
+                      AND hr_pattern_before IS NOT NULL 
+                      AND comfort_score IS NOT NULL
+                    ORDER BY alarm_time DESC
+                  `);
+                  const pastEvents = pastEventsStmt.all(alarm.user_id, eventId);
+
+                  if (pastEvents.length >= 3) {
+                    console.log(`[PRE-ALARM] Found ${pastEvents.length} past events for DTW`);
+
+                    // Call Python backend for DTW recommendation
+                    const dtwResponse = await axios.post('http://localhost:8000/recommend-mixing', {
+                      current_pattern: hrValues,
+                      past_events: pastEvents.map(e => ({
+                        event_id: e.event_id,
+                        hr_pattern_before: JSON.parse(e.hr_pattern_before),
+                        mixing_pattern: e.mixing_pattern,
+                        comfort_score: e.comfort_score
+                      }))
+                    });
+
+                    recommendedMixing = dtwResponse.data.recommended_mixing;
+                    confidence = dtwResponse.data.confidence;
+
+                    console.log(`[PRE-ALARM] DTW recommended mixing: ${recommendedMixing} (confidence: ${confidence.toFixed(2)})`);
+                  } else {
+                    console.log(`[PRE-ALARM] Not enough past data (${pastEvents.length} events), using default`);
+                  }
+                } else {
+                  console.log('[PRE-ALARM] No HR data available, using default mixing A');
+                }
+              } catch (fitbitError) {
+                console.error('[PRE-ALARM] Fitbit/DTW error:', fitbitError.message);
+                console.log('[PRE-ALARM] Using default mixing A');
+              }
+            } else {
+              console.log('[PRE-ALARM] No Fitbit token, using default mixing A');
+            }
+
+            // Update alarm and event with recommended mixing
+            const updateAlarmStmt = db.prepare('UPDATE alarms SET mixing_pattern = ? WHERE id = ?');
+            updateAlarmStmt.run(recommendedMixing, alarm.id);
+
+            const updateEventStmt = db.prepare('UPDATE alarm_events SET mixing_pattern = ? WHERE id = ?');
+            updateEventStmt.run(recommendedMixing, eventId);
+
+            console.log(`[PRE-ALARM] Updated alarm ${alarm.id} and event ${eventId} to use mixing ${recommendedMixing}`);
+
+          } catch (e) {
+            console.error('[PRE-ALARM] Error:', e.message);
+            // Fallback
+            const updateStmt = db.prepare('UPDATE alarms SET mixing_pattern = ? WHERE id = ?');
+            updateStmt.run('A', alarm.id);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[PRE-ALARM] Error:', err);
+  }
+}, 60 * 1000);
+
+console.log('Alarm checker has been started.');
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  const port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    return val;
+  }
+
+  if (port >= 0) {
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  const bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  const addr = server.address();
+  const bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+  console.log(`Server is running on port ${addr.port}`);
+}
