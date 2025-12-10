@@ -5,3 +5,5 @@ pedalboard
 soundfile
 numpy
 pandas
+dtaidistance
+requests

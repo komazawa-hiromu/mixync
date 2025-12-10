@@ -6,7 +6,8 @@ import base64
 import numpy as np
 import pandas as pd
 import soundfile as sf
-from pedalboard import Pedalboard, Reverb, PitchShift, Gain
+from pedalboard import Pedalboard, Reverb, PitchShift, Gain, Delay, Chorus
+from pedalboard.io import AudioFile
 
 app = FastAPI()
 AUDIO_DIR = "audio_files"
@@ -30,9 +31,15 @@ async def process_sleep_data(data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Audio file not found: {audio_filepath}")
 
     try:
-        audio, sample_rate = sf.read(audio_filepath)
+        # Use Pedalboard's AudioFile to read (supports MP3, WAV, etc.)
+        with AudioFile(audio_filepath) as f:
+            audio = f.read(f.frames)
+            sample_rate = f.samplerate
+
+        # Pedalboard returns (channels, samples)
         if audio.ndim > 1:
-            audio = np.mean(audio, axis=1) # Convert to mono for processing
+            audio = np.mean(audio, axis=0) # Convert to mono (axis 0 is channels)
+            
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
@@ -43,40 +50,98 @@ async def process_sleep_data(data: Dict[str, Any]):
         
         # Logic for Mixing Patterns
         if mixing_pattern:
-            print(f"Applying mixing pattern: {mixing_pattern}")
+            # Support composite patterns like "A+B"
+            patterns = mixing_pattern.split('+')
+            print(f"Applying mixing patterns: {patterns}")
             
-            if mixing_pattern == "A": # Tremolo
-                effect_name = "Tremolo"
-                tremolo_rate_hz = 6.0
-                tremolo_depth = 0.3
-                lfo_time = np.arange(len(audio)) / sample_rate
-                lfo = (1 - tremolo_depth) + tremolo_depth * np.sin(2 * np.pi * tremolo_rate_hz * lfo_time)
-                processed_audio = audio * lfo
-                
-            elif mixing_pattern == "B": # Auto-Pan
-                effect_name = "Auto-Pan"
-                pan_rate_hz = 0.5
-                pan_lfo = np.sin(2 * np.pi * pan_rate_hz * (np.arange(len(audio)) / sample_rate))
-                pan_angle = (pan_lfo + 1) * (np.pi / 4)
-                left_gain = np.cos(pan_angle)
-                right_gain = np.sin(pan_angle)
-                left_channel = audio * left_gain
-                right_channel = audio * right_gain
-                processed_audio = np.empty((len(audio), 2), dtype=np.float32)
-                processed_audio[:, 0] = left_channel
-                processed_audio[:, 1] = right_channel
-                
-            elif mixing_pattern == "C": # Shimmer Reverb
-                effect_name = "Shimmer Reverb"
-                shimmer_board = Pedalboard([
-                    PitchShift(semitones=12),
-                    Reverb(room_size=0.9, damping=0.5, wet_level=0.8, dry_level=0.2),
-                    Gain(gain_db=-6)
-                ])
-                shimmer_audio = shimmer_board(audio, sample_rate)
-                processed_audio = (audio * 0.8) + (shimmer_audio * 0.5)
-                
-        # Fallback to Day-based logic if no mixing_pattern
+            for pat in patterns:
+                pat = pat.strip()
+                if not pat: continue
+
+                if pat == "A": # Tremolo
+                    print(f"  - Applying Tremolo (A)")
+                    tremolo_rate_hz = 6.0
+                    tremolo_depth = 0.3
+                    
+                    # Recalculate LFO based on current audio length
+                    current_len = len(processed_audio)
+                    lfo_time = np.arange(current_len) / sample_rate
+                    
+                    # Handle 2D (stereo) or 1D (mono) audio
+                    if processed_audio.ndim == 2:
+                         lfo = (1 - tremolo_depth) + tremolo_depth * np.sin(2 * np.pi * tremolo_rate_hz * lfo_time)
+                         # Apply to both columns
+                         processed_audio[:, 0] *= lfo
+                         processed_audio[:, 1] *= lfo
+                    else:
+                        lfo = (1 - tremolo_depth) + tremolo_depth * np.sin(2 * np.pi * tremolo_rate_hz * lfo_time)
+                        processed_audio = processed_audio * lfo
+                    
+                    effect_name += "+Tremolo" if effect_name else "Tremolo"
+                    
+                elif pat == "B": # Auto-Pan
+                    print(f"  - Applying Auto-Pan (B)")
+                    pan_rate_hz = 0.5
+                    current_len = len(processed_audio)
+                    
+                    pan_lfo = np.sin(2 * np.pi * pan_rate_hz * (np.arange(current_len) / sample_rate))
+                    pan_angle = (pan_lfo + 1) * (np.pi / 4)
+                    left_gain = np.cos(pan_angle)
+                    right_gain = np.sin(pan_angle)
+                    
+                    if processed_audio.ndim == 1:
+                        # Mono -> Stereo
+                        left_channel = processed_audio * left_gain
+                        right_channel = processed_audio * right_gain
+                        processed_audio = np.empty((current_len, 2), dtype=np.float32)
+                        processed_audio[:, 0] = left_channel
+                        processed_audio[:, 1] = right_channel
+                    else:
+                        # Stereo -> Modulate existing channels
+                        processed_audio[:, 0] *= left_gain
+                        processed_audio[:, 1] *= right_gain
+                    
+                    effect_name += "+Auto-Pan" if effect_name else "Auto-Pan"
+                    
+                elif pat == "C": # Shimmer Reverb
+                    print(f"  - Applying Shimmer Reverb (C)")
+                    shimmer_board = Pedalboard([
+                        PitchShift(semitones=12),
+                        Reverb(room_size=0.9, damping=0.5, wet_level=0.8, dry_level=0.2),
+                        Gain(gain_db=-6)
+                    ])
+                    # Pedalboard handles stereo input naturally
+                    shimmer_audio = shimmer_board(processed_audio, sample_rate)
+                    processed_audio = (processed_audio * 0.8) + (shimmer_audio * 0.5)
+                    effect_name += "+Shimmer" if effect_name else "Shimmer"
+    
+                elif pat == "D": # Delay
+                    print(f"  - Applying Delay (D)")
+                    # Use params from request or default
+                    d_seconds = float(data.get("delay_seconds", 0.5))
+                    d_feedback = float(data.get("delay_feedback", 0.4))
+                    d_mix = float(data.get("delay_mix", 0.5))
+                    
+                    delay_board = Pedalboard([
+                        Delay(delay_seconds=d_seconds, feedback=d_feedback, mix=d_mix),
+                        Gain(gain_db=0)
+                    ])
+                    processed_audio = delay_board(processed_audio, sample_rate)
+                    effect_name += "+Delay" if effect_name else "Delay"
+
+                elif pat == "E": # Chorus
+                    print(f"  - Applying Chorus (E)")
+                    # Use params from request or default
+                    c_rate = float(data.get("chorus_rate", 2.1))
+                    c_depth = float(data.get("chorus_depth", 0.45))
+                    c_mix = float(data.get("chorus_mix", 0.3))
+                    
+                    chorus_board = Pedalboard([
+                        Chorus(rate_hz=c_rate, depth=c_depth, centre_delay_ms=7.0, feedback=0.0, mix=c_mix),
+                        Gain(gain_db=0)
+                    ])
+                    processed_audio = chorus_board(processed_audio, sample_rate)
+                    effect_name += "+Chorus" if effect_name else "Chorus"
         elif day_of_week is not None:
             day = int(day_of_week)
             if day in [1, 3, 6]: # Mon, Wed, Sat -> Tremolo
@@ -420,42 +485,151 @@ async def recommend_mixing(data: Dict[str, Any]):
                 "note": "No past data available, using default mixing A"
             }
         
-        # Extract similar events (similarity >= 0.8)
+        # 1. Selection: DTW >= 0.8 OR Top 5
         SIMILARITY_THRESHOLD = 0.8
         similar_events = [e for e in similarities if e["similarity"] >= SIMILARITY_THRESHOLD]
         
-        # Fallback: use top 5 if insufficient similar events
         if len(similar_events) < 5:
+            # Fallback: use top 5 if insufficient similar events
             similar_events = similarities[:min(5, len(similarities))]
+            
+        print(f"[RECOMMEND-MIXING] Selected {len(similar_events)} events for analysis.")
+
+        # 2. Analyze Distribution
+        # Count occurrences of each mixing pattern (including fused ones if they exist in history)
+        # Note: We rely on base components for dominance check? 
+        # Requirement says: "If same mixing is 60%+". If history has "A+B", is it A or B?
+        # Assumption: History mostly has single patterns A-E so far. 
+        # If history has "A+B", we treat it as a distinct pattern "A+B" for counting.
         
-        # Calculate average comfort_score for each mixing
-        mixing_scores = {}
-        for mixing in ["A", "B", "C"]:
-            events = [e for e in similar_events if e["mixing_pattern"] == mixing and e["comfort_score"] is not None]
-            if events:
-                avg_score = sum(e["comfort_score"] for e in events) / len(events)
-                mixing_scores[mixing] = {
-                    "average_score": float(avg_score),
-                    "event_count": len(events)
-                }
+        pattern_counts = {}
+        for event in similar_events:
+            pat = event["mixing_pattern"]
+            pattern_counts[pat] = pattern_counts.get(pat, 0) + 1
+            
+        total_selected = len(similar_events)
+        sorted_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)
+        # sorted_patterns is list of tuples: [("A", 6), ("B", 2), ...]
         
-        # Recommend mixing with highest average score
-        if mixing_scores:
-            best_mixing = max(mixing_scores.items(), key=lambda x: x[1]["average_score"])
-            recommended = best_mixing[0]
-            confidence = best_mixing[1]["average_score"] / 100  # Normalize to 0-1
+        recommended = "A" # Default
+        confidence = 0.5
+        note = ""
+
+        if not sorted_patterns:
+             # Should not happen given check above
+             return { "recommended_mixing": "A", "confidence": 0.0, "mixing_scores": {}, "similar_events_count": 0 }
+
+        top_pattern, top_count = sorted_patterns[0]
+        dominance_ratio = top_count / total_selected
+        
+        print(f"[RECOMMEND-MIXING] Top pattern: {top_pattern} ({top_count}/{total_selected}, {dominance_ratio:.2%})")
+
+        # 3. 60% Rule
+        if dominance_ratio >= 0.6:
+            recommended = top_pattern
+            confidence = 0.9 # High confidence due to dominance
+            note = f"Dominance rule: {top_pattern} is {dominance_ratio:.1%} of similar events."
+        
         else:
-            # Fallback: default mixing
-            recommended = "A"
-            confidence = 0.5
-        
-        print(f"[RECOMMEND-MIXING] Recommended: {recommended}, Confidence: {confidence:.2f}, Similar events: {len(similar_events)}")
+            # 4. Fusion Rule (2 types)
+            # Take top 2 patterns
+            if len(sorted_patterns) >= 2:
+                pat1 = sorted_patterns[0][0]
+                pat2 = sorted_patterns[1][0]
+                
+                # Check if we should fuse. "Fusion is up to 2 types".
+                # If pat1 is already composite "A+B", we probably shouldn't add more?
+                # User said: "Fusion is 2 types".
+                # Simplify: We only fuse if both are single text characters? 
+                # Or just fuse them string-wise and rely on backend validation/sanity?
+                # Let's clean up logic: Fuse the distinct base types.
+                
+                # Deconstruct into base types to handle existing "A+B" in history
+                bases = set()
+                for p in [pat1, pat2]:
+                    for b in p.split('+'):
+                        bases.add(b.strip())
+                
+                # Limit to top 2 distinct base types if we have more
+                # Sorting to ensure deterministic order (A+B vs B+A)
+                unique_bases = sorted(list(bases))
+                
+                # If we have > 2 bases, pick top 2 based on individual counts?
+                # Complex. Let's stick to simplest interpretation of User Prompt:
+                # "Select top 2 patterns... fuse them".
+                # If pat1="A", pat2="B" -> "A+B"
+                
+                candidate_fusion = []
+                
+                # 5. Compatibility Check
+                # Forbidden:
+                # - Tremolo(A) + Chorus(E) (Duplicate oscillation)
+                # - Shimmer(C) + Delay(D) (Duplicate spatial)
+                # - Duration? No mention.
+                
+                # Check combinations from our unique bases.
+                # We need to pick 2 compatible bases with highest counts.
+                
+                # Recalculate counts for individual bases across the top patterns?
+                # Actually, let's look at the similar_events again and count Base Types.
+                base_counts = {}
+                for event in similar_events:
+                    raw_pat = event["mixing_pattern"]
+                    for base in raw_pat.split('+'):
+                        base = base.strip()
+                        if base:
+                            base_counts[base] = base_counts.get(base, 0) + 1
+                
+                sorted_bases = sorted(base_counts.items(), key=lambda x: x[1], reverse=True)
+                print(f"[RECOMMEND-MIXING] Base counts: {sorted_bases}")
+                
+                if len(sorted_bases) >= 2:
+                    base1 = sorted_bases[0][0]
+                    base2 = sorted_bases[1][0]
+                    
+                    # Compatibility Validation
+                    incompatible = False
+                    
+                    # Check A + E
+                    if ("A" in [base1, base2]) and ("E" in [base1, base2]):
+                        incompatible = True
+                        note = "Incompatible: Tremolo(A) + Chorus(E). Fallback to dominance."
+                        
+                    # Check C + D
+                    elif ("C" in [base1, base2]) and ("D" in [base1, base2]):
+                        incompatible = True
+                        note = "Incompatible: Shimmer(C) + Delay(D). Fallback to dominance."
+                        
+                    if incompatible:
+                        # Fallback to single top frequency
+                        recommended = base1
+                        confidence = 0.6
+                    else:
+                        # Fuse them!
+                        # Sort alphabetically for consistency: "A+B"
+                        fused = sorted([base1, base2])
+                        recommended = "+".join(fused)
+                        confidence = 0.8
+                        note = f"Fused top 2 bases: {base1} & {base2}"
+                else:
+                    # Only 1 base type found?
+                    recommended = sorted_bases[0][0]
+                    confidence = 0.7
+                    note = "Only 1 base type found in distribution."
+            else:
+                # Only 1 pattern exists in history
+                recommended = sorted_patterns[0][0]
+                confidence = 0.7
+                note = "Single pattern found."
+
+        print(f"[RECOMMEND-MIXING] Recommended: {recommended}, Confidence: {confidence:.2f}, Note: {note}")
         
         return {
             "recommended_mixing": recommended,
             "confidence": float(confidence),
-            "mixing_scores": mixing_scores,
-            "similar_events_count": len(similar_events)
+            "mixing_scores": pattern_counts, # Returning raw counts as scores for now
+            "similar_events_count": len(similar_events),
+            "note": note
         }
         
     except Exception as e:

@@ -1,0 +1,14 @@
+--- Verifying DTW Fusion Logic ---
+User 1 has 39 events.
+Fetched 39 past events.
+Generated test pattern.
+Sending request to Python backend (http://localhost:8000/recommend-mixing)...
+
+--- Recommendation Result ---
+Recommended Mixing: A+B
+Confidence: 0.8
+Note: Fused top 2 bases: B & A
+mixing_scores: {"B":2,"A":2,"E":1}
+similar_events_count: 5
+
+SUCCESS: Fusion occurred!

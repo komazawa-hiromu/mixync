@@ -60,12 +60,13 @@ router.post('/', (req, res) => {
             });
         }
 
-        // Validate mixing_pattern
-        if (!['A', 'B', 'C'].includes(mixing_pattern)) {
+        // Validate mixing_pattern (Basic check for string)
+        if (typeof mixing_pattern !== 'string' || mixing_pattern.length === 0) {
             return res.status(400).json({
-                message: 'mixing_pattern must be A, B, or C.'
+                message: 'mixing_pattern must be a valid string.'
             });
         }
+        // Strict allow-list removed to support fusion patterns (e.g., "A+B")
 
         const stmt = db.prepare(`
       INSERT INTO alarm_events (

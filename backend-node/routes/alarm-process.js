@@ -226,54 +226,100 @@ router.post('/pre-process', async (req, res) => {
 
                     console.log(`[PRE-PROCESS] Stored HR data in event ${eventId}`);
 
-                    // Get past events for DTW comparison
-                    const pastEventsStmt = db.prepare(`
-                        SELECT 
-                            id as event_id,
-                            hr_pattern_before,
-                            mixing_pattern,
-                            comfort_score
-                        FROM alarm_events
+                    // Count successful past alarm events to determine phase
+                    const countStmt = db.prepare(`
+                        SELECT COUNT(*) as count 
+                        FROM alarm_events 
                         WHERE user_id = ? 
-                            AND id != ?
-                            AND hr_pattern_before IS NOT NULL 
-                            AND comfort_score IS NOT NULL
-                        ORDER BY alarm_time DESC
+                          AND status = 'COMPLETED'
+                          AND id != ?
                     `);
-                    const pastEvents = pastEventsStmt.all(userId, eventId);
+                    // Note: Assuming there is a 'status' column or similar to indicate success.
+                    // If 'status' doesn't exist, we can count events with valid comfort_score.
+                    // Let's use comfort_score IS NOT NULL as a proxy for a "completed" event (one where user woke up and processing finished).
+                    const validEventsStmt = db.prepare(`
+                        SELECT COUNT(*) as count 
+                        FROM alarm_events 
+                        WHERE user_id = ? 
+                          AND comfort_score IS NOT NULL
+                          AND id != ?
+                    `);
 
-                    if (pastEvents.length >= 3) {
-                        console.log(`[PRE-PROCESS] Found ${pastEvents.length} past events for DTW comparison`);
+                    const countResult = validEventsStmt.get(userId, eventId);
+                    const eventCount = countResult.count;
 
-                        try {
-                            // Parse HR patterns
-                            const parsedEvents = pastEvents.map(e => ({
-                                event_id: e.event_id,
-                                hr_pattern_before: JSON.parse(e.hr_pattern_before),
-                                mixing_pattern: e.mixing_pattern,
-                                comfort_score: e.comfort_score
-                            }));
+                    console.log(`[PRE-PROCESS] User has ${eventCount} completed alarm events.`);
 
-                            // Call Python backend for DTW recommendation
-                            const dtwResponse = await axios.post('http://localhost:8000/recommend-mixing', {
-                                current_pattern: hrValues,
-                                past_events: parsedEvents
-                            });
+                    // Progression Logic
+                    if (eventCount < 35) {
+                        // Fixed Pattern Phase (7 days each)
+                        const phaseIndex = Math.floor(eventCount / 7);
+                        // 0: A, 1: B, 2: C, 3: D, 4: E
+                        const patterns = ['A', 'B', 'C', 'D', 'E'];
 
-                            recommendedMixing = dtwResponse.data.recommended_mixing;
-                            confidence = dtwResponse.data.confidence;
+                        // Safety check in case eventCount is somehow >= 35 (though if check handles it)
+                        // but strictly speaking index shouldn't go out of bounds if < 35.
+                        // Max index = floor(34/7) = 4.
 
-                            console.log('[PRE-PROCESS] DTW recommendation:', {
-                                mixing: recommendedMixing,
-                                confidence: confidence.toFixed(2)
-                            });
+                        recommendedMixing = patterns[phaseIndex] || 'A';
+                        confidence = 1.0; // Fixed rule, so high confidence
 
-                        } catch (dtwError) {
-                            console.error('[PRE-PROCESS] DTW error:', dtwError.message);
-                            console.log('[PRE-PROCESS] Falling back to default mixing A');
-                        }
+                        console.log(`[PRE-PROCESS] Progression Phase: Day ${eventCount + 1} (Phase ${phaseIndex}). Forcing Pattern: ${recommendedMixing}`);
+
                     } else {
-                        console.log(`[PRE-PROCESS] Not enough past data (${pastEvents.length} events), using default mixing A`);
+                        // AI Recommendation Phase (DTW)
+                        console.log(`[PRE-PROCESS] AI Phase: Day ${eventCount + 1} (35+ days). Using DTW Recommendation.`);
+
+                        // Get past events for DTW comparison
+                        const pastEventsStmt = db.prepare(`
+                            SELECT 
+                                id as event_id,
+                                hr_pattern_before,
+                                mixing_pattern,
+                                comfort_score
+                            FROM alarm_events
+                            WHERE user_id = ? 
+                                AND id != ?
+                                AND hr_pattern_before IS NOT NULL 
+                                AND comfort_score IS NOT NULL
+                            ORDER BY alarm_time DESC
+                        `);
+                        const pastEvents = pastEventsStmt.all(userId, eventId);
+
+                        if (pastEvents.length >= 3) {
+                            console.log(`[PRE-PROCESS] Found ${pastEvents.length} past events for DTW comparison`);
+
+                            try {
+                                // Parse HR patterns
+                                const parsedEvents = pastEvents.map(e => ({
+                                    event_id: e.event_id,
+                                    hr_pattern_before: JSON.parse(e.hr_pattern_before),
+                                    mixing_pattern: e.mixing_pattern,
+                                    comfort_score: e.comfort_score
+                                }));
+
+                                // Call Python backend for DTW recommendation
+                                const dtwResponse = await axios.post('http://localhost:8000/recommend-mixing', {
+                                    current_pattern: hrValues,
+                                    past_events: parsedEvents
+                                });
+
+                                recommendedMixing = dtwResponse.data.recommended_mixing;
+                                confidence = dtwResponse.data.confidence;
+
+                                console.log('[PRE-PROCESS] DTW recommendation:', {
+                                    mixing: recommendedMixing,
+                                    confidence: confidence.toFixed(2)
+                                });
+
+                            } catch (dtwError) {
+                                console.error('[PRE-PROCESS] DTW error:', dtwError.message);
+                                console.log('[PRE-PROCESS] Falling back to default mixing A');
+                            }
+                        } else {
+                            // Should not happen if count >= 35, but safety fallback
+                            console.log(`[PRE-PROCESS] Not enough past data (${pastEvents.length} events) despite count, using default mixing A`);
+                        }
                     }
                 } else {
                     console.log('[PRE-PROCESS] Failed to interpolate HR data, using default mixing A');

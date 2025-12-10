@@ -28,3 +28,6 @@ frontend/android/local.properties
 *.jar
 frontend/android/cap/lib/
 frontend/android/cap/plugins/
+
+# User Content
+backend-python/audio_files/

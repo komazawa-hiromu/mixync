@@ -132,20 +132,17 @@ function SettingsPage() {
       </Box>
 
       <Box>
-        <Typography variant="h6">新しいアラーム音をアップロード (WAV形式のみ)</Typography>
+        <Typography variant="h6">新しいアラーム音をアップロード (MP3 / WAV)</Typography>
         <Paper variant="outlined" sx={{ p: 2, my: 2, backgroundColor: '#f0f4f8' }}>
           <Typography variant="body2">
-            MP3などのファイルをWAV形式に変換する必要があります。
-            <Link href="https://www.freeconvert.com/mp3-to-wav" target="_blank" rel="noopener noreferrer">
-              こちらのサイト
-            </Link>
-            などで変換できます。
+            MP3ファイルまたはWAVファイルをアップロードできます。
+            システム内で自動的に処理されます。
           </Typography>
         </Paper>
 
         <input
           type="file"
-          accept=".wav,audio/wav"
+          accept=".wav,audio/wav,.mp3,audio/mpeg"
           onChange={handleFileChange}
           style={{ display: 'block', margin: '10px 0' }}
         />

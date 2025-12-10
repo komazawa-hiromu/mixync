@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Box, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Alert } from '@mui/material';
+import { Modal, Box, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Alert, Paper } from '@mui/material';
 
 function AlarmSettingModal({ isOpen, onClose, onSave, existingAlarm, audioFiles }) {
   const [datetime, setDatetime] = useState('');
@@ -46,15 +46,7 @@ function AlarmSettingModal({ isOpen, onClose, onSave, existingAlarm, audioFiles 
     onClose();
   };
 
-  const getMixingDescription = (pattern) => {
-    const descriptions = {
-      'AUTO': 'AI が睡眠中の心拍数パターンから自動選択',
-      'A': 'トレモロ効果 - 音量が周期的に変化',
-      'B': 'PAN効果 - 左右に音が移動',
-      'C': 'シマーリバーブ - 幻想的な響き'
-    };
-    return descriptions[pattern] || '';
-  };
+
 
   return (
     <Modal open={isOpen} onClose={onClose}>
@@ -98,42 +90,23 @@ function AlarmSettingModal({ isOpen, onClose, onSave, existingAlarm, audioFiles 
           </Select>
         </FormControl>
 
-        <FormControl fullWidth sx={{ mt: 2, mb: 1 }}>
-          <InputLabel id="mixing-select-label">ミキシングパターン</InputLabel>
-          <Select
-            labelId="mixing-select-label"
-            value={mixingPattern}
-            label="ミキシングパターン"
-            onChange={(e) => setMixingPattern(e.target.value)}
-          >
-            <MenuItem value="AUTO">🤖 AIに任せる（推奨）</MenuItem>
-            <MenuItem value="A">A - トレモロ</MenuItem>
-            <MenuItem value="B">B - PAN</MenuItem>
-            <MenuItem value="C">C - シマーリバーブ</MenuItem>
-          </Select>
-        </FormControl>
+        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, ml: 1 }}>ミキシングパターン</Typography>
+        <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: '#f0f4f8' }}>
+          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+            🔄 自動進行モード (Graduation Project)
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+            ミキシングパターンは、利用日数に応じて自動的に切り替わります。
+            <br />
+            (7日ごとに変更 → 35日後にAIモードへ移行)
+          </Typography>
+        </Paper>
 
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2, ml: 1 }}>
-          {getMixingDescription(mixingPattern)}
-        </Typography>
-
-        {mixingPattern === 'AUTO' && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            <Typography variant="body2">
-              アラーム5分前に、睡眠中の心拍数パターンを分析し、
-              過去のデータから最適なミキシングを自動選択します。
-            </Typography>
-          </Alert>
-        )}
-
-        {mixingPattern !== 'AUTO' && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            <Typography variant="body2">
-              データ収集期間中は手動選択も可能です。
-              3週間のデータ収集後は「AIに任せる」を推奨します。
-            </Typography>
-          </Alert>
-        )}
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2">
+            AIとプログラムが、あなたに最適な目覚め体験を提供するためにパターンを管理しています。
+          </Typography>
+        </Alert>
 
         <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
           <Button

@@ -3,6 +3,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const { authenticateToken } = require('../middleware/auth');
+const axios = require('axios');
 
 const router = express.Router();
 
@@ -23,8 +24,11 @@ const storage = multer.diskStorage({
     cb(null, audioDir);
   },
   filename: function (req, file, cb) {
-    // Use the original filename, ensuring it's a .wav file
-    const filename = file.originalname.endsWith('.wav') ? file.originalname : `${file.originalname}.wav`;
+    // Keep original extension if it's .wav or .mp3, otherwise default to .wav
+    let filename = file.originalname;
+    if (!filename.endsWith('.wav') && !filename.endsWith('.mp3')) {
+      filename += '.wav'; // Fallback (though fileFilter should catch this)
+    }
     cb(null, filename);
   }
 });
@@ -32,10 +36,11 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'audio/wav' || file.mimetype === 'audio/x-wav') {
+    const allowedTypes = ['audio/wav', 'audio/x-wav', 'audio/mpeg', 'audio/mp3'];
+    if (allowedTypes.includes(file.mimetype) || file.originalname.endsWith('.mp3') || file.originalname.endsWith('.wav')) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only .wav files are allowed.'), false);
+      cb(new Error('Invalid file type. Only .wav and .mp3 files are allowed.'), false);
     }
   }
 });
@@ -48,9 +53,9 @@ router.get('/files', (req, res) => {
     if (err) {
       return res.status(500).json({ message: 'Failed to read audio directory.', error: err.message });
     }
-    // Filter for .wav files only
-    const wavFiles = files.filter(file => file.endsWith('.wav'));
-    res.status(200).json(wavFiles);
+    // Filter for .wav and .mp3 files
+    const audioFiles = files.filter(file => file.endsWith('.wav') || file.endsWith('.mp3'));
+    res.status(200).json(audioFiles);
   });
 });
 
@@ -86,5 +91,8 @@ router.delete('/files/:filename', (req, res) => {
     res.status(200).json({ message: `File '${filename}' deleted successfully.` });
   });
 });
+
+
+
 
 module.exports = router;
