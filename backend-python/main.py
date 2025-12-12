@@ -636,3 +636,7 @@ async def recommend_mixing(data: Dict[str, Any]):
         print(f"--- ERROR in /recommend-mixing ---")
         print(e)
         raise HTTPException(status_code=500, detail=f"Error recommending mixing: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
