@@ -29,7 +29,7 @@ function initialize(passport) {
   passport.use(new FitbitOAuth2Strategy({
     clientID: process.env.FITBIT_CLIENT_ID,
     clientSecret: process.env.FITBIT_CLIENT_SECRET,
-    callbackURL: "http://localhost:3001/auth/fitbit/callback",
+    callbackURL: `https://${process.env.PC_IP_ADDRESS}/auth/fitbit/callback`,
     scope: ['activity', 'heartrate', 'location', 'nutrition', 'profile', 'settings', 'sleep', 'social', 'weight', 'oxygen_saturation', 'respiratory_rate', 'temperature'],
     passReqToCallback: true
   },

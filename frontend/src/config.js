@@ -14,12 +14,12 @@ const PC_IP = import.meta.env.VITE_PC_IP || 'PLEASE_SET_PC_IP';
 const useRealDevice = PC_IP !== 'PLEASE_SET_PC_IP';
 
 export const API_BASE_URL = isNative
-    ? (useRealDevice ? `http://${PC_IP}:3001` : `http://${EMULATOR_IP}:3001`)  // Android実機またはエミュレーター
+    ? (useRealDevice ? `https://${PC_IP}` : `http://${EMULATOR_IP}:3001`)  // Android実機(HTTPS) または エミュレーター
     : 'http://localhost:3001';      // PCブラウザから接続
 
-// WebSocket URL (ws:// protocol)
+// WebSocket URL (ws:// or wss:// protocol)
 export const WS_BASE_URL = isNative
-    ? (useRealDevice ? `ws://${PC_IP}:3001` : `ws://${EMULATOR_IP}:3001`)
+    ? (useRealDevice ? `wss://${PC_IP}` : `ws://${EMULATOR_IP}:3001`)
     : 'ws://localhost:3001';
 
 console.log('[CONFIG] API_BASE_URL:', API_BASE_URL);
