@@ -15,12 +15,12 @@ const useRealDevice = PC_IP !== 'PLEASE_SET_PC_IP';
 
 export const API_BASE_URL = isNative
     ? (useRealDevice ? `https://${PC_IP}` : `http://${EMULATOR_IP}:3001`)  // Android実機(HTTPS) または エミュレーター
-    : 'http://localhost:3001';      // PCブラウザから接続
+    : (useRealDevice ? `https://${PC_IP}` : 'http://localhost:3001');      // PCブラウザから接続 (VPS or Local)
 
 // WebSocket URL (ws:// or wss:// protocol)
 export const WS_BASE_URL = isNative
     ? (useRealDevice ? `wss://${PC_IP}` : `ws://${EMULATOR_IP}:3001`)
-    : 'ws://localhost:3001';
+    : (useRealDevice ? `wss://${PC_IP}` : 'ws://localhost:3001');
 
 console.log('[CONFIG] API_BASE_URL:', API_BASE_URL);
 console.log('[CONFIG] WS_BASE_URL:', WS_BASE_URL);

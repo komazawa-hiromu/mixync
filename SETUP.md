@@ -2,6 +2,12 @@
 
 このガイドでは、BioMixerを自分のFitbitデバイスで使用するための完全なセットアップ手順を説明します。
 
+> **📱 一般ユーザーの方へ**: 
+> このセットアップガイドは**「アプリを開発・ビルドする人」向け**です。
+> アプリを利用するだけの一般ユーザーは、PCやケーブルは一切不要です。**スマホ1台（Android）とインターネット環境**があれば、配布されたアプリ（APK）をインストールするだけで、どこでも利用可能です。
+
+**本番環境（VPS）へのデプロイ手順は [DEPLOY.md](./DEPLOY.md) を参照してください。**
+
 ## 目次
 1. [前提条件](#前提条件)
 2. [Fitbitアプリの登録](#fitbitアプリの登録)
@@ -42,13 +48,13 @@ BioMixerがFitbitのデータにアクセスするには、Fitbit Developer Port
      |------|----------|
      | **Application Name** | `BioMixer` (任意の名前) |
      | **Description** | `AI-powered smart alarm using heart rate data` |
-     | **Application Website** | `http://localhost:3001` |
+     | **Application Website** | `http://localhost:3001` (またはVPSのURL) |
      | **Organization** | 個人名または組織名 |
-     | **Organization Website** | `http://localhost:3001` |
+     | **Organization Website** | `http://localhost:3001` (またはVPSのURL) |
      | **Terms of Service URL** | `http://localhost:3001` (任意) |
      | **Privacy Policy URL** | `http://localhost:3001` (任意) |
      | **OAuth 2.0 Application Type** | **`Personal`** を選択 |
-     | **Redirect URL** | `http://localhost:3001/auth/fitbit/callback` |
+     | **Redirect URL** | `http://localhost:3001/auth/fitbit/callback` <br> (VPSの場合: `https://<VPSドメイン>/auth/fitbit/callback`) |
      | **Default Access Type** | **`Read-Only`** を選択 |
 
 3. **アプリを作成**
@@ -67,7 +73,7 @@ BioMixerがFitbitのデータにアクセスするには、Fitbit Developer Port
 ```bash
 git clone https://github.com/komasan-hiro/new-sunrise-manage.git
 cd new-sunrise-manage
-git checkout capacitor
+git checkout Graduation_Project
 ```
 
 ### 2. 依存関係をインストール
@@ -99,12 +105,17 @@ PORT=3001
 
 # PC IP Address (Android実機テスト用、後で設定)
 PC_IP_ADDRESS=localhost
+# VPSを使用する場合はVPSのドメイン/IPを指定
+# PC_IP_ADDRESS=210.131.211.133.nip.io
 ```
 
 ### 4. サーバーを起動
 
 ```bash
+# ローカル開発の場合
 npm start
+# または
+node ./bin/www
 ```
 
 サーバーは `http://localhost:3001` で起動します。
@@ -175,64 +186,52 @@ npm run dev
 
 ## Android実機での実行
 
-Android実機で動作させる場合は、以下の手順に従ってください。
+Android実機で動作させるには、**「どのサーバー（自分のPC か VPS）」** に接続するかを設定してビルドする必要があります。
 
 ### 前提条件
 - **Android Studio** がインストールされていること
-- PCとAndroid端末が**同じWi-Fiネットワーク**に接続されていること
+- **VPSを使用する場合**: ネットワークの制限はありません（4G/5G、別Wi-FiでもOK）。
+- **ローカルPCを使用する場合**: PCとAndroid端末が**同じWi-Fiネットワーク**に接続されていること。
 
 ### 手順
 
-#### 1. PCのIPアドレスを確認
+#### 1. 接続先サーバー (VITE_PC_IP) の設定
 
-```bash
-# Windowsの場合
-ipconfig
+`frontend/.env` ファイルを作成（または編集）し、接続先を指定します。
 
-# Mac/Linuxの場合
-ifconfig
-```
-
-**IPv4アドレス**（例: `192.168.1.100`）をメモしてください。
-
-#### 2. backend-node/.env を更新
-
-`backend-node/.env` ファイルを開き、`PC_IP_ADDRESS` を設定します：
-
+**A. VPSに接続する場合 (推奨)**
 ```env
-PC_IP_ADDRESS=192.168.1.100
+# VPSのドメインまたはIPアドレス
+VITE_PC_IP=210.131.211.133.nip.io
 ```
+※ Fitbit Developer PortalのRedirect URLも `https://210.131.211.133.nip.io/auth/fitbit/callback` に設定してください。
 
-**重要**: Fitbit OAuth Redirect URLも更新する必要があります。
-- Fitbit Developer Portalに戻り、アプリの設定を編集します。
-- **Redirect URL** に以下を追加します：
-  ```
-  http://192.168.1.100:3001/auth/fitbit/callback
-  ```
+**B. ローカルPCに接続する場合**
+```env
+# PCのローカルIP (ipconfig等で確認)
+VITE_PC_IP=192.168.1.100
+```
+※ Fitbit Developer PortalのRedirect URLも `http://192.168.1.100:3001/auth/fitbit/callback` に設定してください。
 
-#### 3. フロントエンドをビルド
+#### 2. フロントエンドをビルド
+
+設定を反映させるために、ビルドコマンドを実行します。
 
 ```bash
 cd frontend
-
-# Windows (PowerShell)
-$env:VITE_PC_IP="192.168.1.100"; npm run build
-
-# Mac/Linux
-VITE_PC_IP=192.168.1.100 npm run build
+npm run build
+npx cap sync
 ```
 
-#### 4. Android Studioでプロジェクトを開く
+#### 3. 実機にインストール
 
-1. Android Studioを起動します。
-2. **「Open an Existing Project」**を選択します。
-3. `frontend/android` フォルダを選択します。
+1. Android端末をUSBで接続します（USBデバッグON）。
+2. Android Studioを起動して実行、または以下のコマンドで実行します。
 
-#### 5. 実機にインストール
-
-1. Android端末をUSBで接続します（またはWi-Fi経由でデバッグを有効化）。
-2. Android Studioで**「Run」→「Run 'app'」**を選択します。
-3. 接続されたデバイスを選択してインストールします。
+```bash
+npx cap open android
+# Android Studioが開くので「Run」ボタンを押す
+```
 
 ---
 
@@ -271,14 +270,15 @@ VITE_PC_IP=192.168.1.100 npm run build
 
 ### Fitbit認証エラー
 
-- **Redirect URLが正しいか確認**してください（`http://localhost:3001/auth/fitbit/callback` または `http://<PC_IP>:3001/auth/fitbit/callback`）。
-- Fitbit Developer Portalでアプリの設定を確認してください。
+- **Redirect URLが正しいか確認**してください。
+    - VPS: `https://<DOMAIN>/auth/fitbit/callback`
+    - ローカル: `http://<IP>:3001/auth/fitbit/callback`
+- アプリ側が `http` なのか `https` なのか（`frontend/src/config.js` の設定やサーバーのリダイレクト設定）も確認してください。
 
 ### Android実機で接続できない
 
-- PCとAndroid端末が**同じWi-Fiネットワーク**に接続されているか確認してください。
-- `PC_IP_ADDRESS` が正しく設定されているか確認してください。
-- ファイアウォールがポート3001と8000をブロックしていないか確認してください。
+- **VPSの場合**: スマホがインターネットに繋がっているか確認してください。
+- **ローカルの場合**: PCと同じWi-Fiにいるか確認し、ファイアウォール設定（ポート3001/8000）を確認してください。
 
 ### データが取得できない
 
