@@ -251,9 +251,9 @@ router.post('/pre-process', async (req, res) => {
                     console.log(`[PRE-PROCESS] User has ${eventCount} completed alarm events.`);
 
                     // Progression Logic
-                    if (eventCount < 35) {
-                        // Fixed Pattern Phase (7 days each)
-                        const phaseIndex = Math.floor(eventCount / 7);
+                    if (eventCount < 20) {
+                        // Fixed Pattern Phase (4 days each)
+                        const phaseIndex = Math.floor(eventCount / 4);
                         // 0: A, 1: B, 2: C, 3: D, 4: E
                         const patterns = ['A', 'B', 'C', 'D', 'E'];
 
@@ -553,6 +553,34 @@ router.post('/recommend', async (req, res) => {
         }
 
         console.log('[RECOMMEND] Starting recommendation for user:', userId);
+
+        // --- Phase Logic Integration (Matching alarm-logic.js) ---
+        // Ensure the display matches the actual execution logic (Phase 0-4)
+        const countStmt = db.prepare(`
+            SELECT COUNT(*) as count 
+            FROM alarm_events 
+            WHERE user_id = ? AND comfort_score IS NOT NULL
+        `);
+        const countRes = countStmt.get(userId);
+        const eventCount = countRes.count || 0;
+
+        console.log(`[RECOMMEND] Completed events count: ${eventCount}`);
+
+        if (eventCount < 20) {
+            const phaseIndex = Math.floor(eventCount / 4);
+            const patterns = ['A', 'B', 'C', 'D', 'E'];
+            const fixedPattern = patterns[phaseIndex] || 'A';
+
+            console.log(`[RECOMMEND] Phase ${phaseIndex}: Returning fixed pattern ${fixedPattern}`);
+            return res.status(200).json({
+                recommended_mixing: fixedPattern,
+                confidence: 1.0,
+                mixing_scores: {},
+                similar_events_count: 0,
+                note: `Phase ${phaseIndex} (Rule-based transition)`
+            });
+        }
+        // ---------------------------------------------------------
 
         // Fetch past events with HR patterns and comfort scores
         const stmt = db.prepare(`
