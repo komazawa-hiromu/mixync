@@ -55,7 +55,7 @@ Mixyncは、睡眠慣性（Sleep Inertia） の解消を目指して開発され
 
 ## 🏗 System Architecture (Architectural Flow)
 
-Users' sleep data and feedback form a continuous optimization loop.
+ユーザーの睡眠データとフィードバックが循環し、システムが最適化され続けるデータフローを設計しています。
 
 ```mermaid
 graph TD
