@@ -53,31 +53,31 @@ Mixyncは、睡眠慣性（Sleep Inertia） の解消を目指して開発され
 
 ---
 
-## 🏗 システムアーキテクチャ (処理フロー)
+## 🏗 System Architecture (Architectural Flow)
 
-ユーザーの睡眠データとフィードバックが循環し、システムが最適化され続けるデータフローを設計しています。
+Users' sleep data and feedback form a continuous optimization loop.
 
 ```mermaid
 graph TD
-    %% ノード定義 (Node Definitions)
-    UserSleep(("user<br>睡眠時"))
-    Wearable["ウェアラブルデバイス<br>(Fitbit)を着用"]
+    %% Node Definitions
+    UserSleep(("User<br>(Asleep)"))
+    Wearable["Wearable Device<br>(Fitbit)"]
     
-    MixingList[("アラーム音に使われている<br>ミキシング処理リスト")]
+    MixingList[("Mixing Process List<br>(Currently Active)")]
     
-    subgraph Database [user睡眠データベース]
+    subgraph Database [User Sleep Database]
         direction TB
-        DB_Meta[("user評価<br>起床時刻")]
-        DB_Bio[("心拍数の上昇速度<br>心拍数の標準偏差<br>睡眠ログ")]
+        DB_Meta[("User Rating<br>Wake-up Time")]
+        DB_Bio[("Heart Rate Slope<br>Heart Rate StdDev<br>Sleep Log")]
     end
     
-    Optimize["userにとって最適な<br>ミキシング処理"]
-    AlarmSound["userにとって最適な<br>アラーム音"]
+    Optimize["Optimal Mixing Process<br>for User"]
+    AlarmSound["Optimal Alarm Sound<br>for User"]
     
-    UserWake(("user<br>起床時"))
-    Evaluation[アラーム音の評価]
+    UserWake(("User<br>(Awake)"))
+    Evaluation["Alarm Sound Evaluation"]
     
-    %% 接続 (Connections)
+    %% Connections
     UserSleep --> Wearable
     Wearable --> Database
     
