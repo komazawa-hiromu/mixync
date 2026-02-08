@@ -14,10 +14,7 @@
 
 **「もう、不快な目覚めは繰り返さない。」**
 
-Mixyncは、**睡眠慣性（Sleep Inertia）** の解消を目指して開発されたスマートアラームアプリケーションです。
-従来の「固定音を鳴らすだけ」のアラームとは異なり、Fitbitから取得した**リアルタイムの心拍数・睡眠深度**を解析します。
-
-その日の自律神経の状態に合わせて、AIが**最適なミキシング処理（トレモロ、リバーブ等）を動的に生成・合成します**。これにより、脳を自然に覚醒状態へと導く「最高の目覚め体験」を提供します。
+Mixyncは、睡眠慣性（Sleep Inertia） の解消を目指して開発されたスマートアラームアプリケーションです。 従来の「固定音を鳴らすだけ」のアラームとは異なり、Fitbitから取得したリアルタイムの心拍数・睡眠深度を解析し、その日の自律神経の状態に合わせて、AIが最適なミキシング処理（トレモロ、リバーブ等）を動的に生成・合成します。これにより、脳を自然に覚醒状態へと導く「最高の目覚め体験」を提供します。
 
 ---
 
@@ -63,21 +60,21 @@ Mixyncは、**睡眠慣性（Sleep Inertia）** の解消を目指して開発�
 ```mermaid
 graph TD
     %% ノード定義 (Node Definitions)
-    UserSleep((user<br>睡眠時))
-    Wearable[ウェアラブルデバイス<br>(Fitbit)を着用]
+    UserSleep(("user<br>睡眠時"))
+    Wearable["ウェアラブルデバイス<br>(Fitbit)を着用"]
     
-    MixingList[(アラーム音に使われている<br>ミキシング処理リスト)]
+    MixingList[("アラーム音に使われている<br>ミキシング処理リスト")]
     
     subgraph Database [user睡眠データベース]
         direction TB
-        DB_Meta[(user評価<br>起床時刻)]
-        DB_Bio[(心拍数の上昇速度<br>心拍数の標準偏差<br>睡眠ログ)]
+        DB_Meta[("user評価<br>起床時刻")]
+        DB_Bio[("心拍数の上昇速度<br>心拍数の標準偏差<br>睡眠ログ")]
     end
     
-    Optimize[userにとって最適な<br>ミキシング処理]
-    AlarmSound[userにとって最適な<br>アラーム音]
+    Optimize["userにとって最適な<br>ミキシング処理"]
+    AlarmSound["userにとって最適な<br>アラーム音"]
     
-    UserWake((user<br>起床時))
+    UserWake(("user<br>起床時"))
     Evaluation[アラーム音の評価]
     
     %% 接続 (Connections)
